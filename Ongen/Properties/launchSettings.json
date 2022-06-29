@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "Ongen (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "Ongen (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}

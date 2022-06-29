@@ -1,0 +1,100 @@
+﻿<Window 
+    x:Class="Ongen.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:CommunityToolkit.WinUI.UI.Controls"
+    xmlns:converters="using:CommunityToolkit.WinUI.UI.Converters"
+    xmlns:local="using:Ongen"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d"
+    xmlns:BackdropMaterial.ApplyToRootOrPageBackground="True">
+
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <Grid Grid.Row="0" x:Name="AppTitleBar"  
+      Height="48">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition x:Name="LeftPaddingColumn" Width="0"/>
+                <ColumnDefinition x:Name="IconColumn" Width="Auto"/>
+                <ColumnDefinition x:Name="TitleColumn" Width="Auto"/>
+                <ColumnDefinition x:Name="LeftDragColumn" Width="*"/>
+                <ColumnDefinition x:Name="SearchColumn" Width="Auto"/>
+                <ColumnDefinition x:Name="RightDragColumn" Width="*"/>
+                <ColumnDefinition x:Name="RightPaddingColumn" Width="0"/>
+            </Grid.ColumnDefinitions>
+            <Image x:Name="TitleBarIcon" Source="/Images/WindowIcon.png"
+           Grid.Column="1"
+           Width="16" Height="16"
+           Margin="8,0,0,0"/>
+            <TextBlock x:Name="TitleTextBlock" 
+               Text="Ongen" 
+               Style="{StaticResource CaptionTextBlockStyle}"
+               Grid.Column="2"
+               VerticalAlignment="Center"
+               Margin="4,0,0,0"/>
+            <ComboBox x:Name="GameSelector" SelectionChanged="ComboBox_SelectionChanged" Grid.Column="4" PlaceholderText="Game" ItemsSource="{x:Bind games}" DisplayMemberPath="Name"
+           Width="260" Margin="4,0" VerticalAlignment="Center" />
+        </Grid>
+
+        <InfoBar Margin="16,48,16,16" x:Name="info" IsOpen="False" Severity="Informational" Title="Welcome" Message="Select a game from the dropdown to continue" />
+
+        <Grid Grid.Row="1" Background="{ThemeResource LayerFillColorDefaultBrush}" 
+              Margin="16" VerticalAlignment="Stretch"
+                                CornerRadius="8"
+                                BorderThickness="1"
+                                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+              >
+            <controls:DataGrid
+                ItemsSource="{x:Bind selectedGame.Tracks}"
+      Grid.Row="0"
+        x:Name="dataGrid"
+        VerticalAlignment="Stretch" HorizontalAlignment="Stretch"
+        HorizontalScrollBarVisibility="Visible"
+        VerticalScrollBarVisibility="Visible"
+        AreRowDetailsFrozen="True"
+        AreRowGroupHeadersFrozen="True"
+        CanUserSortColumns="True"
+        CanUserReorderColumns="True"
+        CanUserResizeColumns="False"
+        ColumnHeaderHeight="32"
+        MaxColumnWidth="400"
+        FrozenColumnCount="0"
+        GridLinesVisibility="All"
+        HeadersVisibility="Column"
+        IsReadOnly="True"
+        RowDetailsVisibilityMode="Collapsed"
+        SelectionMode="Single"
+                AutoGenerateColumns="True">
+                <controls:DataGrid.Columns>
+                    <controls:DataGridTextColumn Header="Loaded" Binding="{Binding Loaded}" Tag="Loaded" />
+                    <controls:DataGridTextColumn Header="Track" Binding="{Binding Name}" Tag="Track" />
+                    <controls:DataGridTextColumn Header="Bind" Binding="{Binding Hotkey}" Tag="Bind" />
+                    <controls:DataGridTextColumn Header="Volume" Binding="{Binding Volume}" Tag="Volume" />
+                    <controls:DataGridTextColumn Header="Trimmed" Binding="{Binding StartPos}" Tag="Trimmed" />
+                    <controls:DataGridTextColumn Header="Tags" Binding="{Binding Tags}" Tag="Tags" />
+                </controls:DataGrid.Columns>
+            </controls:DataGrid>
+        </Grid>
+
+        <Grid Grid.Row="2" Height="48" Margin="16, 0, 16, 16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <Button Click="ImportButton_Click" x:Name="ImportButton" Margin="0,0,8,0" Grid.Column="0">Import</Button>
+            <Button Click="YTImportButton_Click" x:Name="YTImportButton" Margin="0,0,8,0" Grid.Column="1">YouTube</Button>
+            <TextBlock x:Name="StatusLabel" VerticalAlignment="Center" Text="Status: Idle" Grid.Column="2" />
+            <Button Click="PlayKeyButton_Click" x:Name="PlayKeyButton" Grid.Column="3">Play key: "V" (change)</Button>
+        </Grid>
+        <ProgressBar x:Name="ProgressBar" Grid.Row="3" Width="Auto" IsIndeterminate="True" ShowPaused="True" ShowError="False" Margin="16,0,16,16"/>
+    </Grid>
+</Window>
