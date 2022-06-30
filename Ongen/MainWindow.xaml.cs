@@ -25,6 +25,11 @@ using NReco.VideoConverter;
 using System.Threading.Tasks;
 using Windows.Storage;
 using System.Diagnostics;
+using CommunityToolkit.WinUI.UI.Controls;
+using Microsoft.UI.Dispatching;
+using System.Management;
+using System.Threading;
+using System.Text.RegularExpressions;
 
 // To learn more about WinUI, the WinUI project structure,
 // and more about our project templates, see: http://aka.ms/winui-project-info.
@@ -37,6 +42,8 @@ namespace Ongen
     public sealed partial class MainWindow : Window
     {
         private string cwd;
+        DispatcherQueue dispatcher = DispatcherQueue.GetForCurrentThread();
+        CancellationTokenSource tk;
 
         private AppWindow appWindow;
         WindowsSystemDispatcherQueueHelper m_wsdqHelper;
@@ -45,10 +52,11 @@ namespace Ongen
 
         SourceGame selectedGame;
         ObservableCollection<SourceGame> games = new();
-        bool running = false;
+        bool paused = true;
         bool closePending = false;
         string steamAppsPath;
         Status status = Status.IDLE;
+        int currentTrack = -1;
 
         public MainWindow()
         {
@@ -80,6 +88,8 @@ namespace Ongen
             }*/
 
             SetupTitlebar();
+
+            StatusLabel.Text = "Idle";
         }
 
         private void SetupTitlebar()
@@ -93,6 +103,7 @@ namespace Ongen
                 titlebar.ExtendsContentIntoTitleBar = true;
                 titlebar.PreferredHeightOption = TitleBarHeightOption.Tall;
                 titlebar.ButtonBackgroundColor = Colors.Transparent;
+                titlebar.InactiveBackgroundColor = Colors.Transparent;
                 AppTitleBar.Loaded += AppTitleBar_Loaded;
                 AppTitleBar.SizeChanged += AppTitleBar_SizeChanged;
                 TrySetMicaBackdrop();
@@ -131,6 +142,7 @@ namespace Ongen
 
             return false; // Mica is not supported on this system
         }
+
 
         private void Window_Activated(object sender, WindowActivatedEventArgs args)
         {
@@ -262,49 +274,396 @@ namespace Ongen
             return AppWindow.GetFromWindowId(wndId);
         }
 
-        private async void WaveCreator(string file, string output, SourceGame game)
+        private Task<int> WaveCreator(string file, string output)
         {
+            var tcs = new TaskCompletionSource<int>();
             // fuck it, raw mode!
-            Process ffmpeg;
-            var command = $"-y -i \"{file}\" -f wav -flags bitexact -map_metadata -1 -vn -acodec pcm_s16le -ar {game.SampleRate} -ac {game.Channels} \"{Path.GetFullPath(output)}\"";
-            try
-            {
-                ProcessStartInfo ffmpegInfo = new ProcessStartInfo()
+            var command = $"-i \"{file}\" -f wav -flags bitexact -map_metadata -1 -vn -acodec pcm_s16le -ar {selectedGame.SampleRate} -ac {selectedGame.Channels} \"{Path.GetFullPath(output)}\" -y";
+
+                Process ffmpeg = new Process
                 {
-                    FileName = "ffmpeg",
+                    StartInfo =
+                    {
+                         FileName = $"ffmpeg",
                     Arguments = command,
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
-                    CreateNoWindow = false,
+                    CreateNoWindow = true,
+                    },
+                   EnableRaisingEvents = true
                 };
-                ffmpeg = Process.Start(ffmpegInfo);
-                ffmpeg.WaitForExit();
-                info.IsOpen = true;
-                info.Title = $"Import successful";
-                info.Message = $"{output} is now ready to be used";
-                info.Severity = InfoBarSeverity.Success;
-            } catch (Exception)
+
+            ffmpeg.Exited += (sender, args) =>
+            {
+                tcs.SetResult(ffmpeg.ExitCode);
+                ffmpeg.Dispose();
+            };
+
+
+                ffmpeg.Start();
+            
+
+
+            return tcs.Task;
+        }
+
+        private void StartPoll()
+        {
+            paused = false;
+            StartButton.Content = "Stop";
+            StatusLabel.Text = "Starting";
+            DisableInterface();
+            StartButton.IsEnabled = true;
+            trackList.IsEnabled = true;
+            ProgressBar.ShowPaused = false;
+            GameSelector.IsEnabled = false;
+            /*if (tk == null)
+            {
+                PollRelay();
+            }*/
+            PollRelay();
+        }
+
+        private async Task FindProcess(string gameDir, string userDataPath)
+        {
+                try
+                {
+                    if (!Convert.ToBoolean(ConfigurationManager.AppSettings["OverrideFolders"]))
+                    {
+                        do
+                        {
+                            var gameProcess = GetFilePath(selectedGame.ExeName);
+                            if (!string.IsNullOrEmpty(gameProcess) && gameProcess.EndsWith(gameDir))
+                            {
+                                steamAppsPath = gameProcess.Remove(gameProcess.Length - gameDir.Length);
+                            }
+                            else
+                                throw new Exception($"{selectedGame.Name} is not running.");
+
+                            var steamProcess = GetFilePath("Steam");
+                            if (!string.IsNullOrEmpty(steamProcess))
+                            {
+                                userDataPath = steamProcess.Remove(steamProcess.Length - "Steam.exe".Length) + "userdata\\";
+                            }
+
+                        Debug.WriteLine(userDataPath);
+
+                            if (Directory.Exists(steamAppsPath))
+                            {
+                                if (!(selectedGame.Id == 0))
+                                    if (Directory.Exists(userDataPath))
+                                        break;
+                            }
+                            else
+                                break;
+                        } while (true);
+
+                        StatusLabel.Text = userDataPath;
+
+                     await Task.Delay(selectedGame.PollInterval);
+                    }
+                    else
+                    {
+                        steamAppsPath = ConfigurationManager.AppSettings["steamapps"];
+                        if (Directory.Exists(ConfigurationManager.AppSettings["userdata"]))
+                            userDataPath = ConfigurationManager.AppSettings["userdata"];
+                        else
+                            throw new Exception("Userdata folder does not exist.");
+                    }
+
+                    if (!string.IsNullOrEmpty(steamAppsPath))
+                        CreateCfgFiles(steamAppsPath);
+                }
+                catch (Exception)
+                {
+                    throw;
+                }
+
+            return;
+        }
+
+        private async void PollRelay()
+        {
+            // this replaces the pollrelayworker in the original SLAM
+            tk = new CancellationTokenSource();
+            CancellationToken ct = tk.Token;
+
+            status = Status.SEARCHING;
+            var gameDir = Path.Combine(selectedGame.Directory, selectedGame.ExeName + ".exe");
+            string userDataPath = null;
+
+            try
+            {
+
+                await FindProcess(gameDir, userDataPath);
+                status = Status.WORKING;
+                StatusLabel.Text = "Active";
+                ProgressBar.IsIndeterminate = false;
+                ProgressBar.Value = 100;
+                if (currentTrack != -1)
+                {
+                    LoadTrack(currentTrack);
+                    DisplayLoaded(currentTrack);
+                }
+                /*await Task.Run(async () =>
+                {
+                    ct.ThrowIfCancellationRequested();
+                    do
+                    {
+                        try
+                        {
+                            var gameFolder = Path.Combine(steamAppsPath, selectedGame.Directory);
+                            var gameCfg = Path.Combine(gameFolder, selectedGame.ToCfg) + "ongen_relay.cfg";
+                            if (!(selectedGame.Id == 0))
+                            {
+                                gameCfg = UserDataCFG(userDataPath);
+                            }
+                            if (File.Exists(gameCfg))
+                            {
+                                string relayCfg;
+                                using (var reader = new StreamReader(gameCfg))
+                                {
+                                    relayCfg = reader.ReadToEnd();
+                                }
+                                var command = recog(relayCfg, $"bind \"{ConfigurationManager.AppSettings["RelayKey"]}\" \"(.*?)\"");
+                                Debug.WriteLine(command);
+                                if (!(string.IsNullOrEmpty(command)))
+                                {
+                                    if (command.All(char.IsNumber))
+                                    {
+                                        if (LoadTrack(Convert.ToInt32(command) - 1))
+                                        {
+                                            // report progress?
+                                            Debug.WriteLine(Convert.ToInt32(command) - 1);
+                                        }
+                                    }
+                                    File.Delete(gameCfg);
+                                }
+                            }
+                            await Task.Delay(selectedGame.PollInterval);
+                        }
+                        catch (Exception ex)
+                        {
+                            if (!(ex.HResult == -2147024864))
+                            {
+                                throw;
+                            }
+                        }
+                    } while (!ct.IsCancellationRequested);
+                }, tk.Token);*/
+            }
+            catch (OperationCanceledException e)
+            {
+                ProgressBar.ShowError = true;
+                var d = new ContentDialog()
+                {
+                    Title = "Relay Cancellation",
+                    Content = $"The poll relay worker decided to cancel. Reason: {e.Message}",
+                    CloseButtonText = "Ok"
+                };
+                d.XamlRoot = trackList.XamlRoot;
+                d.CloseButtonClick += D_CloseButtonClick;
+                await d.ShowAsync();
+            }
+            catch (Exception e)
+            {
+                ProgressBar.ShowError = true;
+                var d = new ContentDialog()
+                {
+                    Title = "Failure",
+                    Content = $"{e.Message}",
+                    CloseButtonText = "Ok"
+                };
+                d.XamlRoot = trackList.XamlRoot;
+                d.CloseButtonClick += D_CloseButtonClick;
+                await d.ShowAsync();
+            }
+        }
+
+        private void D_CloseButtonClick(ContentDialog sender, ContentDialogButtonClickEventArgs args)
+        {
+            StopPoll();
+        }
+
+        private void DeleteCFGs(string steamAppsPath)
+        {
+            var gameDir = Path.Combine(steamAppsPath, selectedGame.Directory);
+            var gameCfgFolder = Path.Combine(gameDir, selectedGame.ToCfg);
+            string[] ongenFiles =
+            {
+                "ongen.cfg", "ongen_tracklist.cfg", "ongen_relay.cfg", "ongen_curtrack.cfg", "ongen_saycurtrack.cfg", "ongen_sayteamcurtrack.cfg"
+            };
+            var voicefile = Path.Combine(steamAppsPath, selectedGame.Directory) + "voice_input.wav";
+
+            try
+            {
+                if (File.Exists(voicefile))
+                    File.Delete(voicefile);
+
+                foreach (var fileName in ongenFiles)
+                {
+                    if (File.Exists(gameCfgFolder + fileName))
+                        File.Delete(gameCfgFolder + fileName);
+                }
+            }
+            catch (Exception)
             {
                 throw;
             }
         }
 
-        private void StartPoll()
+        private string recog(string relayCfg, string v)
         {
-            running = true;
-            DisableInterface();
+            var keyd = Regex.Match(relayCfg, v, RegexOptions.IgnoreCase);
+            return keyd.Groups[1].ToString();
+        }
+
+        private string UserDataCFG(string userDataPath)
+        {
+            if (Directory.Exists(userDataPath))
+            {
+                foreach (var userdir in Directory.GetDirectories(userDataPath))
+                {
+                    var cfgPath = Path.Combine(userdir, selectedGame.Id.ToString()) + "\\local\\cfg\\ongen_relay.cfg";
+                    if (File.Exists(cfgPath)) return cfgPath;
+                }
+            }
+            return null;
+        }
+
+        private void CreateCfgFiles(string steamAppsPath)
+        {
+            var gameDir = Path.Combine(steamAppsPath, selectedGame.Directory);
+            var gameCfgFolder = Path.Combine(gameDir, selectedGame.ToCfg);
+
+            if (!Directory.Exists(gameCfgFolder))
+            {
+                throw new Exception("Steamapps folder is incorrect.");
+            }
+
+            using (var ongen = new StreamWriter(gameCfgFolder + "ongen.cfg")) { 
+                ongen.WriteLine("alias ongen_listtracks \"exec ongen_tracklist.cfg\"");
+                ongen.WriteLine("alias list ongen_listtracks");
+                ongen.WriteLine("alias tracks ongen_listtracks");
+                ongen.WriteLine("alias la ongen_listtracks");
+                ongen.WriteLine("alias ongen_play ongen_play_on");
+                ongen.WriteLine("alias ongen_play_on \"alias ongen_play ongen_play_off; voice_inputfromfile 1; voice_loopback 1; +voicerecord\"");
+                ongen.WriteLine("alias ongen_play_off \"-voicerecord; voice_inputfromfile 0; voice_loopback 0; alias ongen_play ongen_play_on\"");
+                ongen.WriteLine("alias ongen_updatecfg \"host_writeconfig ongen_relay\"");
+                if (Convert.ToBoolean(ConfigurationManager.AppSettings["HoldToPlay"]))
+                {
+                    ongen.WriteLine("alias +ongen_hold_play ongen_play_on");
+                    ongen.WriteLine("alias -ongen_hold_play ongen_play_off");
+                    ongen.WriteLine($"bind V +ongen_hold_play");
+                }
+                else
+                {
+                    ongen.WriteLine($"bind V ongen_play");
+                }
+                ongen.WriteLine("alias ongen_curtrack \"exec ongen_curtrack.cfg\"");
+                ongen.WriteLine("alias ongen_saycurtrack \"exec ongen_saycurtrack.cfg\"");
+                ongen.WriteLine("alias ongen_sayteamcurtrack \"exec ongen_sayteamcurtrack.cfg\"");
+
+                foreach (var track in selectedGame.Tracks)
+                {
+                    var index = selectedGame.Tracks.IndexOf(track);
+                    ongen.WriteLine($"alias {index + 1} \"bind {ConfigurationManager.AppSettings["RelayKey"]} {index + 1}; ongen_updatecfg; echo Loaded: {track.Name}\"");
+                    foreach (var trackTag in track.Tags)
+                    {
+                        ongen.WriteLine($"alias {trackTag} \"bind {ConfigurationManager.AppSettings["RelayKey"]} {index + 1}; ongen_updatecfg; echo Loaded: {track.Name}\"");
+                    }
+
+                    if (!String.IsNullOrEmpty(track.Hotkey))
+                    {
+                        ongen.WriteLine($"alias {track.Hotkey} \"bind {ConfigurationManager.AppSettings["RelayKey"]} {index + 1}; ongen_updatecfg; echo Loaded: {track.Name}\"");
+                    }
+                }
+
+                var cfgData = "voice_enable 1; voice_modenable 1; voice_forcemicrecord 0; con_enable 1";
+                if (selectedGame.VoiceFadeOut)
+                {
+                    cfgData += "; voice_fadeouttime 0.0";
+                }
+
+                ongen.WriteLine(cfgData);
+            }
+
+            using (var ongenTrackList = new StreamWriter(gameCfgFolder + "ongen_tracklist.cfg"))
+            {
+                ongenTrackList.WriteLine("echo \"You can select tracks either by typing a tag, or their track number.\"");
+                ongenTrackList.WriteLine("echo \"--------------------Tracks--------------------\"");
+                foreach (var track in selectedGame.Tracks)
+                {
+                    var index = selectedGame.Tracks.IndexOf(track);
+                    ongenTrackList.WriteLine($"echo \"{index + 1}. {track.Name} [{"'" + String.Join("', '", track.Tags) + "'"}]\"");
+                }
+                ongenTrackList.Write("echo \"----------------------------------------------\"");
+            }
+        }
+
+        private string GetFilePath(string exeName)
+        {
+            var wmiQueryString = $"Select * from Win32_Process Where Name = \"{exeName}.exe\"";
+
+            var searcher = new ManagementObjectSearcher(wmiQueryString);
+            var results = searcher.Get();
+            var process = results.Cast<ManagementObject>().FirstOrDefault();
+            if (process != null)
+            {
+                var exePath = process["ExecutablePath"];
+                StatusLabel.Text = exePath.ToString();
+                var procPath = exePath != null ? exePath.ToString() : null;
+                if (!string.IsNullOrWhiteSpace(procPath))
+                    return process["ExecutablePath"].ToString();
+            }
+            return null;
+        }
+        private void StopPoll()
+        {
+            status = Status.IDLE;
+            /*if (tk != null)
+            {
+                tk.Cancel();
+                tk.Dispose();
+                tk = null;
+                StatusLabel.Text = "Deleting temporary files";
+                if (!string.IsNullOrEmpty(steamAppsPath))
+                {
+                    DeleteCFGs(steamAppsPath);
+                }
+            }*/
+            StatusLabel.Text = "Deleting temporary files";
+            if (!string.IsNullOrEmpty(steamAppsPath))
+            {
+                DeleteCFGs(steamAppsPath);
+            }
+            paused = true;
+            StartButton.Content = "Start";
+            StatusLabel.Text = "Stopped";
+            EnableInterface();
+            ProgressBar.IsIndeterminate = true;
+            ProgressBar.Value = 0;
+            ProgressBar.ShowPaused = true;
+            ProgressBar.ShowError = false;
+            GameSelector.IsEnabled = true;
         }
 
         private void DisableInterface()
         {
             ImportButton.IsEnabled = false;
             YTImportButton.IsEnabled = false;
+            StartButton.IsEnabled = false;
+            PlayKeyButton.IsEnabled = false;
+            trackList.IsEnabled = false;
         }
 
         private void EnableInterface()
         {
             ImportButton.IsEnabled = true;
             YTImportButton.IsEnabled = true;
+            StartButton.IsEnabled = true;
+            PlayKeyButton.IsEnabled = true;
+            trackList.IsEnabled = true;
         }
 
         private void SetGames()
@@ -323,12 +682,31 @@ namespace Ongen
                 VoiceFadeOut = false
             });
 
-            // can't be arsed to add games I don't play atm
+            games.Add(new SourceGame
+            {
+                Name = "Team Fortress 2",
+                Directory = "common\\Team Fortress 2\\",
+                ToCfg = "tf\\cfg\\",
+                LibraryName = "tf2\\",
+                SampleRate = 22050,
+                Blacklist = new()
+                {"attack", "attack2", "attack3", "back", "build", "cancelselect", "centerview", "changeclass", "changeteam", "disguiseteam", "duck", "forward", "grab", "invnext", "invprev", "jump", "kill", "klook", "lastdisguise", "lookdown", "lookup", "moveleft", "moveright", "moveup", "pause", "quit", "reload", "say", "screenshot", "showmapinfo", "showroundinfo", "showscores", "slot1", "slot10", "slot2", "slot3", "slot4", "slot5", "slot6", "slot7", "slot8", "slot9", "strafe", "toggleconsole", "voicerecord"},
+            });
+
+            games.Add(new SourceGame
+            {
+                Name = "Garry's Mod",
+                Directory = "common\\GarrysMod\\",
+                ToCfg = "garrysmod\\cfg\\",
+                LibraryName = "gmod\\"
+            });
 
         }
 
         private void RefreshTrackList()
         {
+            trackList.ItemsSource = null;
+            trackList.ItemsSource = selectedGame.Tracks;
         }
 
         private void ReloadTracks()
@@ -347,6 +725,7 @@ namespace Ongen
                         selectedGame.Tracks.Add(track);
                     }
                 }
+                RefreshTrackList();
             }
             else
             {
@@ -368,6 +747,7 @@ namespace Ongen
         {
             DisableInterface();
             selectedGame = ((sender as ComboBox).SelectedItem as SourceGame);
+            currentTrack = -1;
             ReloadTracks();
             EnableInterface();
         }
@@ -388,24 +768,29 @@ namespace Ongen
 
             IReadOnlyList<Windows.Storage.StorageFile> files = await openFileDialog.PickMultipleFilesAsync();
 
-            bool ready = false;
             if (files.Count > 0)
             {
                 DisableInterface();
                 // convert them all into wav and place them into a folder with the game name
-                ProgressBar.IsIndeterminate = false;
-                ProgressBar.Maximum = 1;
-                ready = ImportFiles(files);
+                StatusLabel.Text = $"Starting the converter...";
+                ProgressBar.IsIndeterminate = true;
+                ProgressBar.ShowPaused = false;
+                ProgressBar.Value = 0;
+                ProgressBar.Maximum = files.Count;
+                bool ready = await ImportFiles(files);
 
                 if (ready)
                 {
                     EnableInterface();
+                    StatusLabel.Text = "Idle";
                     ReloadTracks();
+                    ProgressBar.IsIndeterminate = true;
+                    ProgressBar.ShowPaused = true;
                 }
             }
         }
 
-        private bool ImportFiles(IReadOnlyList<StorageFile> files)
+        private async Task<bool> ImportFiles(IReadOnlyList<StorageFile> files)
         {
             int i = 0;
             foreach (var file in files)
@@ -416,8 +801,13 @@ namespace Ongen
                     if (!Directory.Exists(Path.Combine(cwd, selectedGame.LibraryName))) {
                         Directory.CreateDirectory(Path.Combine(cwd, selectedGame.LibraryName)); 
                     }
-                    WaveCreator(file.Path, outfile, selectedGame);
-                    ProgressBar.Value += Math.Clamp(++i, 0, 1);
+                    var result = await WaveCreator(file.Path, outfile);
+                        ProgressBar.IsIndeterminate = false;
+                        Debug.WriteLine(result);
+                        ReloadTracks();
+                        StatusLabel.Text = $"Importing {i + 1} out of {files.Count} files...";
+                        ProgressBar.Value = i;
+                        i++;
                 }
                 catch (Exception)
                 {
@@ -431,7 +821,7 @@ namespace Ongen
         private async void YTImportButton_Click(object sender, RoutedEventArgs e)
         {
             YTImport dialog = new YTImport();
-            dialog.XamlRoot = dataGrid.XamlRoot;
+            dialog.XamlRoot = trackList.XamlRoot;
             dialog.Style = Application.Current.Resources["DefaultContentDialogStyle"] as Style;
             dialog.Title = "Import from YouTube";
             dialog.PrimaryButtonText = "Import";
@@ -441,9 +831,13 @@ namespace Ongen
             
         }
 
-        private void PlayKeyButton_Click(object sender, RoutedEventArgs e)
+        private async void PlayKeyButton_Click(object sender, RoutedEventArgs e)
         {
-
+            SelectKey dialog = new SelectKey("V");
+            dialog.XamlRoot = trackList.XamlRoot;
+            dialog.Style = Application.Current.Resources["DefaultContentDialogStyle"] as Style;
+            dialog.DefaultButton = ContentDialogButton.Primary;
+            await dialog.ShowAsync();
         }
 
         [ComImport]
@@ -459,6 +853,129 @@ namespace Ongen
         internal interface IWindowNative
         {
             IntPtr WindowHandle { get; }
+        }
+
+        private void trackList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            var track = (sender as DataGrid).SelectedIndex;
+            if (track != -1)
+            {
+                currentTrack = track;
+                SetVolumeButton.IsEnabled = true;
+                TrimButton.IsEnabled = true;
+                if (status == Status.WORKING)
+                {
+                    LoadTrack(track);
+                    DisplayLoaded(track);
+                }
+            }
+            else
+            {
+                SetVolumeButton.IsEnabled = false;
+                TrimButton.IsEnabled = false;
+            }
+        }
+
+        private void DisplayLoaded(int track)
+        {
+            for (int i = 0; i <= selectedGame.Tracks.Count - 1; i++)
+            {
+                selectedGame.Tracks[i].Loaded = false;
+                //(trackList.Items[i] as Track).Loaded = false;
+            }
+            selectedGame.Tracks[track].Loaded = true;
+            //(trackList.Items[track] as Track).Loaded = true;
+        }
+
+        private bool LoadTrack(int index)
+        {
+            if (selectedGame.Tracks.Count > index)
+            {
+                Debug.WriteLine(index);
+                var track = selectedGame.Tracks[index];
+                var voicefile = Path.Combine(steamAppsPath, selectedGame.Directory) + "voice_input.wav";
+                // move the track to the game directory to be processed as a voice input
+                try
+                {
+                    if (File.Exists(voicefile)) File.Delete(voicefile);
+
+                    var trackFile = Path.Combine(cwd, selectedGame.LibraryName, track.Name + selectedGame.FileExtension);
+                    if (File.Exists(trackFile))
+                    {
+                        if (track.Volume == 100 && track.StartPos <= 0 && track.EndPos <= 0)
+                        {
+                            StatusLabel.Text = track.Name;
+                            File.Copy(trackFile, voicefile);
+                        }
+                        else
+                        {
+                            // do some audio black magic
+                        }
+                    }
+                    var gameCfgFolder = Path.Combine(steamAppsPath, selectedGame.Directory, selectedGame.ToCfg);
+                    using (var ongenCurTrack = new StreamWriter(gameCfgFolder + "ongen_curtrack.cfg"))
+                    {
+                        ongenCurTrack.WriteLine($"echo \"[ONGEN] Track name: {track.Name}\"");
+                    }
+                    using (var ongenSayCurTrack = new StreamWriter(gameCfgFolder + "ongen_saycurtrack.cfg"))
+                    {
+                        ongenSayCurTrack.WriteLine($"say \"[ONGEN] Track name: {track.Name}\"");
+                    }
+                    using (var ongenSayTeamCurTrack = new StreamWriter(gameCfgFolder + "ongen_sayteamcurtrack.cfg"))
+                    {
+                        ongenSayTeamCurTrack.WriteLine($"say_team \"[ONGEN] Track name: {track.Name}\"");
+                    }
+                    currentTrack = index;
+                    return true;
+                } catch (Exception)
+                {
+                    throw;
+                }
+            }
+            else
+            {
+                return false;
+            }
+        }
+
+        private async void StartButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (paused)
+            {
+                var reminder = new ContentDialog()
+                {
+                    Title = "Steps within the game",
+                    Content = "Please type \"exec ongen\" in the console to ensure the sounds play",
+                    CloseButtonText = "Ok"
+                };
+                reminder.XamlRoot = trackList.XamlRoot;
+                await reminder.ShowAsync();
+                StartPoll();
+            }
+            else
+            {
+                StopPoll();
+            }
+        }
+
+        private async void SetVolumeButton_Click(object sender, RoutedEventArgs e)
+        {
+            SetVolume dialog = new SetVolume(selectedGame.Tracks[currentTrack].Volume);
+            dialog.XamlRoot = trackList.XamlRoot;
+            dialog.Style = Application.Current.Resources["DefaultContentDialogStyle"] as Style;
+            dialog.DefaultButton = ContentDialogButton.Primary;
+            dialog.Title = $"Set a new volume for \"{selectedGame.Tracks[currentTrack].Name}\"";
+            await dialog.ShowAsync();
+        }
+
+        private async void TrimButton_Click(object sender, RoutedEventArgs e)
+        {
+            Trim dialog = new Trim(selectedGame.Tracks[currentTrack].StartPos, selectedGame.Tracks[currentTrack].EndPos);
+            dialog.XamlRoot = trackList.XamlRoot;
+            dialog.Style = Application.Current.Resources["DefaultContentDialogStyle"] as Style;
+            dialog.DefaultButton = ContentDialogButton.Primary;
+            dialog.Title = $"Trim \"{selectedGame.Tracks[currentTrack].Name}\"";
+            await dialog.ShowAsync();
         }
     }
 }

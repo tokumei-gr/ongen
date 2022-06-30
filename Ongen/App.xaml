@@ -10,6 +10,7 @@
                 <!-- Other merged dictionaries here -->
             </ResourceDictionary.MergedDictionaries>
             <!-- Other app resources here -->
+            <local:ListToStringConverter x:Key="ListToStringConverter" />
         </ResourceDictionary>
     </Application.Resources>
 </Application>

@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -23,7 +24,7 @@ namespace Ongen
 
         public int PollInterval { get; set; } = 100;
 
-        public List<Track> Tracks { get; set; } = new();
+        public ObservableCollection<Track> Tracks { get; set; } = new();
         public List<string> Blacklist { get; set; } = new()
         {
             "ongen", 
@@ -43,11 +44,13 @@ namespace Ongen
 
     public class Track
     {
+        public bool Loaded { get; set; } = false;
         public string Name { get; set; }
-        public List<string> Tags { get; set; }
+        public List<string> Tags { get; set; } = new();
         public string Hotkey { get; set; } = null;
         public int Volume { get; set; } = 100;
         public int StartPos { get; set; }
         public int EndPos { get; set; }
+        public bool Trimmed { get; set; } = false;
     }
 }

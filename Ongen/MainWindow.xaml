@@ -17,6 +17,7 @@
             <RowDefinition />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
         <Grid Grid.Row="0" x:Name="AppTitleBar"  
       Height="48">
@@ -46,15 +47,39 @@
         <InfoBar Margin="16,48,16,16" x:Name="info" IsOpen="False" Severity="Informational" Title="Welcome" Message="Select a game from the dropdown to continue" />
 
         <Grid Grid.Row="1" Background="{ThemeResource LayerFillColorDefaultBrush}" 
-              Margin="16" VerticalAlignment="Stretch"
+              Margin="16,0,16,8" VerticalAlignment="Stretch"
                                 CornerRadius="8"
                                 BorderThickness="1"
                                 BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
               >
+
+            <!--<ListView Grid.Row="0" x:Name="trackList" VerticalAlignment="Stretch" SelectionChanged="trackList_SelectionChanged" HorizontalAlignment="Stretch">
+                <ListView.ItemTemplate>
+                    <DataTemplate x:DataType='local:Track'>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="{x:Bind Loaded}" Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="NoWrap"/>
+                            <TextBlock Grid.Column="1" Text="{x:Bind Name}" Style="{StaticResource BodyStrongTextBlockStyle}" TextWrapping="NoWrap"/>
+                            <TextBlock Grid.Column="2" Text="{x:Bind Hotkey}" Style="{StaticResource CaptionTextStyle}" TextWrapping="NoWrap"/>
+                            <TextBlock Grid.Column="3" Text="{x:Bind Volume}" Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="NoWrap"/>
+                            <TextBlock Grid.Column="4" Text="{x:Bind Trimmed}" Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="NoWrap"/>
+                            <TextBlock Grid.Column="5" Text="{x:Bind Tags}" Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="Wrap"/>
+                        </Grid>
+                    </DataTemplate>
+                </ListView.ItemTemplate>
+            </ListView>-->
+
             <controls:DataGrid
                 ItemsSource="{x:Bind selectedGame.Tracks}"
       Grid.Row="0"
-        x:Name="dataGrid"
+        x:Name="trackList"
         VerticalAlignment="Stretch" HorizontalAlignment="Stretch"
         HorizontalScrollBarVisibility="Visible"
         VerticalScrollBarVisibility="Visible"
@@ -62,39 +87,80 @@
         AreRowGroupHeadersFrozen="True"
         CanUserSortColumns="True"
         CanUserReorderColumns="True"
-        CanUserResizeColumns="False"
+        CanUserResizeColumns="True"
         ColumnHeaderHeight="32"
+                IsReadOnly="true"
         MaxColumnWidth="400"
         FrozenColumnCount="0"
         GridLinesVisibility="All"
         HeadersVisibility="Column"
-        IsReadOnly="True"
         RowDetailsVisibilityMode="Collapsed"
         SelectionMode="Single"
-                AutoGenerateColumns="True">
+                SelectionChanged="trackList_SelectionChanged"
+                AutoGenerateColumns="False">
                 <controls:DataGrid.Columns>
-                    <controls:DataGridTextColumn Header="Loaded" Binding="{Binding Loaded}" Tag="Loaded" />
                     <controls:DataGridTextColumn Header="Track" Binding="{Binding Name}" Tag="Track" />
                     <controls:DataGridTextColumn Header="Bind" Binding="{Binding Hotkey}" Tag="Bind" />
                     <controls:DataGridTextColumn Header="Volume" Binding="{Binding Volume}" Tag="Volume" />
-                    <controls:DataGridTextColumn Header="Trimmed" Binding="{Binding StartPos}" Tag="Trimmed" />
-                    <controls:DataGridTextColumn Header="Tags" Binding="{Binding Tags}" Tag="Tags" />
+                    <controls:DataGridTextColumn Header="Trimmed" Binding="{Binding Trimmed}" Tag="Trimmed" />
+                    <controls:DataGridTextColumn Header="Tags" Binding="{Binding Tags, Converter={StaticResource ListToStringConverter}}" Tag="Tags" />
                 </controls:DataGrid.Columns>
             </controls:DataGrid>
-        </Grid>
 
-        <Grid Grid.Row="2" Height="48" Margin="16, 0, 16, 16">
+
+            <!-- <GridView
+                Grid.Row="0"
+    x:Name="trackList"
+    ItemsSource="{x:Bind selectedGame.Tracks}"
+    IsItemClickEnabled="True"
+    CanDragItems="False"
+    AllowDrop="True"
+    CanReorderItems="True"
+    SelectionMode="Single"
+    SelectionChanged="trackList_SelectionChanged"
+                HorizontalAlignment="Stretch"
+                VerticalAlignment="Stretch"
+    ItemClick="trackList_ItemClick"
+    FlowDirection="LeftToRight">
+                <GridView.ItemTemplate>
+                    <DataTemplate x:DataType='local:Track'>
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <TextBlock Grid.Row="0" Style = '{StaticResource BodyStrongTextBlockStyle}' Text = '{x:Bind Name}'/>
+                            <Grid Grid.Row="1">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="{x:Bind Loaded}" Grid.Column="0"></TextBlock>
+                            </Grid>
+                        </Grid>
+                    </DataTemplate>
+                </GridView.ItemTemplate>
+            </GridView>-->
+
+        </Grid>
+        <TextBlock HorizontalAlignment="Stretch" Margin="16,8" x:Name="StatusLabel" VerticalAlignment="Center" Grid.Row="2" />
+        <Grid Grid.Row="3" Height="48" Margin="16, 0, 16, 16">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
             <Button Click="ImportButton_Click" x:Name="ImportButton" Margin="0,0,8,0" Grid.Column="0">Import</Button>
             <Button Click="YTImportButton_Click" x:Name="YTImportButton" Margin="0,0,8,0" Grid.Column="1">YouTube</Button>
-            <TextBlock x:Name="StatusLabel" VerticalAlignment="Center" Text="Status: Idle" Grid.Column="2" />
-            <Button Click="PlayKeyButton_Click" x:Name="PlayKeyButton" Grid.Column="3">Play key: "V" (change)</Button>
+            <Button Style="{StaticResource AccentButtonStyle}" Click="StartButton_Click" Width="130" x:Name="StartButton" Margin="0,0,8,0" Grid.Column="2">Start</Button>
+            <Button Click="TrimButton_Click" IsEnabled="False" x:Name="TrimButton" Grid.Column="3">Trim</Button>
+            <Button Click="SetVolumeButton_Click" IsEnabled="False" Margin="8,0" x:Name="SetVolumeButton" Grid.Column="4">Set volume</Button>
+            <Button Click="PlayKeyButton_Click" x:Name="PlayKeyButton" Grid.Column="5">Play key: "V" (change)</Button>
         </Grid>
-        <ProgressBar x:Name="ProgressBar" Grid.Row="3" Width="Auto" IsIndeterminate="True" ShowPaused="True" ShowError="False" Margin="16,0,16,16"/>
+        <ProgressBar x:Name="ProgressBar" Grid.Row="4" Width="Auto" IsIndeterminate="True" ShowPaused="{x:Bind paused}" ShowError="False" Margin="16,0,16,16"/>
     </Grid>
 </Window>
